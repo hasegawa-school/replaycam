@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kendama Pro Camera</title>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; overflow: hidden; font-family: 'Arial Black', sans-serif; }
+    .video-container { position: relative; width: 100vw; height: 100vh; background: #000; transition: opacity 0.5s ease; }
+    video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
+    .mirror { transform: scaleX(-1); }
+    #hiddenLiveVideo { display: none; }
+
+    #start-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.9); z-index: 1000;
+      display: flex; flex-direction: column; justify-content: center; align-items: center;
+    }
+    #start-button {
+      padding: 20px 40px; font-size: 32px; font-weight: bold; color: white;
+      background: #ff0000; border: none; border-radius: 50px; cursor: pointer;
+      box-shadow: 0 0 20px rgba(255,0,0,0.5); transition: transform 0.2s;
+    }
+
+    .ui-layer { position: absolute; z-index: 100; pointer-events: none; }
+    #status-ui { bottom: 40px; right: 40px; color: white; font-size: 24px; text-shadow: 2px 2px 4px #000; background: rgba(255, 0, 0, 0.6); padding: 10px 20px; border-radius: 8px; transition: all 0.3s; }
+    
+    #footer { 
+      bottom: 10px; left: 50%; transform: translateX(-50%); 
+      color: rgba(255,255,255,0.2); font-size: 10px; 
+      pointer-events: auto; cursor: pointer;
+    }
+
+    #settings-panel {
+      position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%);
+      background: rgba(30, 30, 30, 0.95); padding: 15px; border-radius: 10px;
+      display: none; z-index: 300; color: white; font-family: sans-serif; font-size: 14px;
+      border: 1px solid #444; box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    }
+    #settings-panel label { display: block; margin: 10px 0; }
+    #settings-panel input { width: 60px; background: #333; color: #fff; border: 1px solid #666; padding: 3px; margin-left: 10px; }
+
+    #replay-indicator {
+      top: 30px; left: 30px; display: none;
+      color: #ff0000; font-size: 32px; font-weight: 900; font-style: italic;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+      animation: blink 0.8s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    #replay-cutin {
+      top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0) skewX(-20deg);
+      color: white; font-size: 12vw; font-weight: 900; font-style: italic;
+      text-transform: uppercase; letter-spacing: 5px; z-index: 120;
+      text-shadow: 0 0 30px rgba(255,0,0,1), 5px 5px 10px rgba(0,0,0,0.9);
+      opacity: 0; pointer-events: none;
+    }
+    @keyframes cutinAnim {
+      0%   { transform: translate(-50%, -50%) scale(0.1) skewX(-20deg); opacity: 0; }
+      20%  { transform: translate(-50%, -50%) scale(1.2) skewX(-20deg); opacity: 1; }
+      30%  { transform: translate(-50%, -50%) scale(1.0) skewX(-20deg); opacity: 1; }
+      70%  { transform: translate(-50%, -50%) scale(1.0) skewX(-20deg); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(2.0) skewX(-20deg); opacity: 0; }
+    }
+    #replay-cutin.animate { animation: cutinAnim 1.5s ease-in-out forwards; }
+    .fade-out { opacity: 0; }
+    .touch-grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; z-index: 200; }
+    .touch-area { background: rgba(0,0,0,0); outline: none; -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body>
+
+  <div id="start-overlay">
+    <button id="start-button" onclick="startSystem()">START LIVE CAMERA</button>
+    <p style="color: white; margin-top: 20px; font-size: 14px; opacity: 0.7;">GitHub Version: Local Settings Enabled</p>
+  </div>
+
+  <div id="mainContainer" class="video-container">
+    <video id="displayVideo" autoplay playsinline></video>
+    <video id="hiddenLiveVideo" autoplay playsinline muted></video>
+    
+    <div id="replay-indicator" class="ui-layer">● REPLAY</div>
+    <div id="replay-cutin" class="ui-layer">REPLAY</div>
+    <div id="status-ui" class="ui-layer">READY</div>
+    <div id="footer" class="ui-layer" onclick="toggleSettings()">© 2026 Hasegawa Konosuke.</div>
+
+    <div id="settings-panel">
+      <strong>REPLAY SETTINGS</strong>
+      <label>Speed (0.1-1.0): <input type="number" id="set-speed" step="0.1" min="0.1" max="1.0" onchange="saveSettings()"></label>
+      <label>Delay (sec): <input type="number" id="set-delay" step="1" min="0" onchange="saveSettings()"></label>
+      <button onclick="toggleSettings()" style="width:100%; margin-top:10px; background:#444; color:white; border:none; padding:5px;">CLOSE</button>
+    </div>
+
+    <div class="touch-grid">
+      <div class="touch-area" onclick="toggleHide()"></div>
+      <div class="touch-area" onclick="switchCamera()"></div>
+      <div class="touch-area" onclick="toggleMirror()"></div>
+      <div class="touch-area" onclick="handleAction()"></div>
+    </div>
+  </div>
+
+  <script>
+    const container = document.getElementById('mainContainer');
+    const displayVideo = document.getElementById('displayVideo');
+    const hiddenLiveVideo = document.getElementById('hiddenLiveVideo');
+    const statusUi = document.getElementById('status-ui');
+    const replayIndicator = document.getElementById('replay-indicator');
+    const replayCutin = document.getElementById('replay-cutin');
+
+    let mode = 'LIVE';
+    let isRecording = false, isReplaying = false, isMirror = false, isHidden = false;
+    let isWaitingForReplay = false, replayTimeoutId = null;
+    let videoDevices = [], currentDeviceIndex = 0, currentStream = null;
+    let mediaRecorder, chunks = [], lastReplayUrl = null;
+    let mediaSource, sourceBuffer, queue = [];
+    
+    let settings = {
+      speed: parseFloat(localStorage.getItem('kendama_speed')) || 0.5,
+      delay: parseFloat(localStorage.getItem('kendama_delay')) || 5
+    };
+
+    function saveSettings() {
+      const s = parseFloat(document.getElementById('set-speed').value);
+      const d = parseFloat(document.getElementById('set-delay').value);
+      if(!isNaN(s)) { settings.speed = s; localStorage.setItem('kendama_speed', s); }
+      if(!isNaN(d)) { settings.delay = d; localStorage.setItem('kendama_delay', d); }
+    }
+
+    function toggleSettings() {
+      const panel = document.getElementById('settings-panel');
+      document.getElementById('set-speed').value = settings.speed;
+      document.getElementById('set-delay').value = settings.delay;
+      panel.style.display = (panel.style.display === 'block') ? 'none' : 'block';
+    }
+
+    async function startSystem() {
+      document.getElementById('start-overlay').style.display = 'none';
+      await init();
+    }
+
+    async function init() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        videoDevices = devices.filter(device => device.kind === 'videoinput');
+        if (videoDevices.length > 0) setupCamera(videoDevices[0].deviceId);
+      } catch (e) { alert("Camera Error: " + e); }
+    }
+
+    async function setupCamera(deviceId) {
+      if (currentStream) currentStream.getTracks().forEach(track => track.stop());
+      const constraints = { video: { deviceId: { exact: deviceId }, width: 1280, height: 720 }, audio: false };
+      try {
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        hiddenLiveVideo.srcObject = currentStream;
+        updateMode(mode);
+      } catch (e) {
+        // Fallback for mobile/other
+        currentStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        hiddenLiveVideo.srcObject = currentStream;
+        updateMode(mode);
+      }
+    }
+
+    function updateMode(newMode) {
+      container.classList.add('fade-out');
+      setTimeout(() => {
+        mode = newMode;
+        resetState();
+        if (mediaSource) { try { mediaSource.endOfStream(); } catch(e){} }
+        
+        if (mode === 'LIVE') {
+          displayVideo.srcObject = currentStream;
+          displayVideo.src = "";
+          statusUi.innerText = "LIVE";
+          statusUi.style.background = "rgba(255, 0, 0, 0.6)";
+        } else {
+          initDelaySystem();
+          statusUi.innerText = "DELAY";
+          statusUi.style.background = "rgba(0, 0, 255, 0.6)";
+        }
+        container.classList.remove('fade-out');
+      }, 500);
+    }
+
+    function resetState() {
+      isReplaying = false;
+      isRecording = false;
+      isWaitingForReplay = false;
+      if (replayTimeoutId) clearTimeout(replayTimeoutId);
+      replayIndicator.style.display = 'none';
+      replayCutin.classList.remove('animate');
+    }
+
+    function initDelaySystem() {
+      mediaSource = new MediaSource();
+      displayVideo.srcObject = null;
+      displayVideo.src = URL.createObjectURL(mediaSource);
+      queue = [];
+      mediaSource.addEventListener('sourceopen', () => {
+        sourceBuffer = mediaSource.addSourceBuffer('video/webm; codecs="vp8"');
+        const recorder = new MediaRecorder(currentStream, { mimeType: 'video/webm; codecs="vp8"' });
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const buf = new Uint8Array(reader.result);
+              setTimeout(() => {
+                if (sourceBuffer && !sourceBuffer.updating) sourceBuffer.appendBuffer(buf);
+                else queue.push(buf);
+              }, settings.delay * 1000);
+            };
+            reader.readAsArrayBuffer(e.data);
+          }
+        };
+        recorder.start(100);
+        sourceBuffer.addEventListener('updateend', () => {
+          if (queue.length > 0 && !sourceBuffer.updating) sourceBuffer.appendBuffer(queue.shift());
+        });
+      });
+    }
+
+    function handleAction() {
+      if (mode !== 'LIVE' || isHidden) return;
+      if (isWaitingForReplay) { resetState(); stopReplay(); return; }
+      if (isReplaying) { stopReplay(); return; }
+
+      if (!isRecording) {
+        chunks = [];
+        mediaRecorder = new MediaRecorder(currentStream);
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          if (lastReplayUrl) URL.revokeObjectURL(lastReplayUrl);
+          lastReplayUrl = URL.createObjectURL(blob);
+          isWaitingForReplay = true;
+          statusUi.innerText = "WAIT...";
+          statusUi.style.background = "#555";
+          replayTimeoutId = setTimeout(() => {
+            if (isWaitingForReplay) { isWaitingForReplay = false; startReplay(lastReplayUrl); }
+          }, 1000);
+        };
+        mediaRecorder.start();
+        isRecording = true;
+        statusUi.innerText = "REC";
+        statusUi.style.background = "red";
+      } else {
+        mediaRecorder.stop();
+        isRecording = false;
+      }
+    }
+
+    function startReplay(url) {
+      isReplaying = true;
+      displayVideo.srcObject = null;
+      displayVideo.src = url;
+      displayVideo.playbackRate = settings.speed;
+      statusUi.innerText = "■STOP";
+      statusUi.style.background = "rgba(0,0,0,0.8)";
+      replayIndicator.style.display = 'block';
+      replayCutin.classList.remove('animate'); 
+      void replayCutin.offsetWidth; 
+      replayCutin.classList.add('animate'); 
+      displayVideo.play();
+      displayVideo.onended = stopReplay;
+    }
+
+    function stopReplay() {
+      resetState();
+      displayVideo.src = "";
+      displayVideo.srcObject = currentStream;
+      displayVideo.playbackRate = 1.0;
+      statusUi.innerText = "LIVE";
+      statusUi.style.background = "rgba(255, 0, 0, 0.6)";
+    }
+
+    function launchConfetti() {
+      const end = Date.now() + (1 * 1000);
+      (function frame() {
+        confetti({ particleCount: 3, angle: 60, spread: 55, origin: { x: 0, y: 0.6 }, scalar: 3 });
+        confetti({ particleCount: 3, angle: 120, spread: 55, origin: { x: 1, y: 0.6 }, scalar: 3 });
+        if (Date.now() < end) { requestAnimationFrame(frame); }
+      }());
+    }
+
+    function toggleMirror() { isMirror = !isMirror; displayVideo.classList.toggle('mirror'); }
+    function toggleHide() { isHidden = !isHidden; displayVideo.style.opacity = isHidden ? "0" : "1"; statusUi.style.opacity = isHidden ? "0" : "1"; }
+    function switchCamera() { if (videoDevices.length < 2) return; currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length; setupCamera(videoDevices[currentDeviceIndex].deviceId); }
+
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (e.code === 'Space') { e.preventDefault(); handleAction(); }
+      if (key === 'l') updateMode('LIVE');
+      if (key === 'd') updateMode(mode === 'LIVE' ? 'DELAY' : 'LIVE');
+      if (key === 'p') { if (lastReplayUrl && !isRecording && !isReplaying) startReplay(lastReplayUrl); }
+      if (key === 'r') toggleMirror();
+      if (key === 'c') switchCamera();
+      if (key === 's') launchConfetti();
+      if (key === 'h') toggleHide(); 
+    });
+  </script>
+</body>
+</html>
