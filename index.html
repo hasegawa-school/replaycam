@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <base target="_top">
   <title>Kendama Pro Camera</title>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
   <style>
@@ -12,6 +13,7 @@
     .mirror { transform: scaleX(-1); }
     #hiddenLiveVideo { display: none; }
 
+    /* スタート画面オーバーレイ */
     #start-overlay {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       background: rgba(0,0,0,0.9); z-index: 1000;
@@ -22,25 +24,29 @@
       background: #ff0000; border: none; border-radius: 50px; cursor: pointer;
       box-shadow: 0 0 20px rgba(255,0,0,0.5); transition: transform 0.2s;
     }
+    #start-button:active { transform: scale(0.9); }
 
+    /* UIレイヤー */
     .ui-layer { position: absolute; z-index: 100; pointer-events: none; }
     #status-ui { bottom: 40px; right: 40px; color: white; font-size: 24px; text-shadow: 2px 2px 4px #000; background: rgba(255, 0, 0, 0.6); padding: 10px 20px; border-radius: 8px; transition: all 0.3s; }
     
+    /* 隠し設定トリガー（コピーライト） */
     #footer { 
       bottom: 10px; left: 50%; transform: translateX(-50%); 
-      color: rgba(255,255,255,0.2); font-size: 10px; 
+      color: rgba(255,255,255,0.4); font-size: 10px; 
       pointer-events: auto; cursor: pointer;
     }
 
+    /* 隠し設定パネル */
     #settings-panel {
       position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%);
-      background: rgba(30, 30, 30, 0.95); padding: 15px; border-radius: 10px;
-      display: none; z-index: 300; color: white; font-family: sans-serif; font-size: 14px;
+      background: rgba(20, 20, 20, 0.9); padding: 15px; border-radius: 10px;
+      display: none; z-index: 300; color: white; font-family: sans-serif; font-size: 12px;
       border: 1px solid #444; box-shadow: 0 0 15px rgba(0,0,0,0.5);
     }
-    #settings-panel label { display: block; margin: 10px 0; }
-    #settings-panel input { width: 60px; background: #333; color: #fff; border: 1px solid #666; padding: 3px; margin-left: 10px; }
-
+    #settings-panel label { display: block; margin: 8px 0; }
+    #settings-panel input { width: 50px; background: #333; color: #fff; border: 1px solid #666; margin-left: 10px; }
+    
     #replay-indicator {
       top: 30px; left: 30px; display: none;
       color: #ff0000; font-size: 32px; font-weight: 900; font-style: italic;
@@ -54,7 +60,7 @@
       color: white; font-size: 12vw; font-weight: 900; font-style: italic;
       text-transform: uppercase; letter-spacing: 5px; z-index: 120;
       text-shadow: 0 0 30px rgba(255,0,0,1), 5px 5px 10px rgba(0,0,0,0.9);
-      opacity: 0; pointer-events: none;
+      opacity: 0;
     }
     @keyframes cutinAnim {
       0%   { transform: translate(-50%, -50%) scale(0.1) skewX(-20deg); opacity: 0; }
@@ -66,30 +72,27 @@
     #replay-cutin.animate { animation: cutinAnim 1.5s ease-in-out forwards; }
     .fade-out { opacity: 0; }
     .touch-grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; z-index: 200; }
-    .touch-area { background: rgba(0,0,0,0); outline: none; -webkit-tap-highlight-color: transparent; }
+    .touch-area { background: rgba(0,0,0,0); }
   </style>
 </head>
 <body>
 
   <div id="start-overlay">
     <button id="start-button" onclick="startSystem()">START LIVE CAMERA</button>
-    <p style="color: white; margin-top: 20px; font-size: 14px; opacity: 0.7;">GitHub Version: Local Settings Enabled</p>
+    <p style="color: white; margin-top: 20px; font-size: 14px; opacity: 0.7;">Click to Activate Camera & Control</p>
   </div>
 
   <div id="mainContainer" class="video-container">
     <video id="displayVideo" autoplay playsinline></video>
     <video id="hiddenLiveVideo" autoplay playsinline muted></video>
-    
     <div id="replay-indicator" class="ui-layer">● REPLAY</div>
     <div id="replay-cutin" class="ui-layer">REPLAY</div>
     <div id="status-ui" class="ui-layer">READY</div>
-    <div id="footer" class="ui-layer" onclick="toggleSettings()">© 2026 Hasegawa Konosuke.</div>
+    <div id="footer" class="ui-layer" onclick="toggleSettings()">© 2026 Hasegawa Konosuke. All rights reserved.</div>
 
     <div id="settings-panel">
-      <strong>REPLAY SETTINGS</strong>
-      <label>Speed (0.1-1.0): <input type="number" id="set-speed" step="0.1" min="0.1" max="1.0" onchange="saveSettings()"></label>
-      <label>Delay (sec): <input type="number" id="set-delay" step="1" min="0" onchange="saveSettings()"></label>
-      <button onclick="toggleSettings()" style="width:100%; margin-top:10px; background:#444; color:white; border:none; padding:5px;">CLOSE</button>
+      <label>REPLAY速度: <input type="number" id="input-speed" step="0.1" min="0.1" max="1.0" onchange="saveSettings()"></label>
+      <label>追っかけ(秒): <input type="number" id="input-delay" step="1" min="0" onchange="saveSettings()"></label>
     </div>
 
     <div class="touch-grid">
@@ -115,22 +118,23 @@
     let mediaRecorder, chunks = [], lastReplayUrl = null;
     let mediaSource, sourceBuffer, queue = [];
     
+    // 設定をブラウザの保存領域（localStorage）から読み込み
     let settings = {
       speed: parseFloat(localStorage.getItem('kendama_speed')) || 0.5,
       delay: parseFloat(localStorage.getItem('kendama_delay')) || 5
     };
 
     function saveSettings() {
-      const s = parseFloat(document.getElementById('set-speed').value);
-      const d = parseFloat(document.getElementById('set-delay').value);
-      if(!isNaN(s)) { settings.speed = s; localStorage.setItem('kendama_speed', s); }
-      if(!isNaN(d)) { settings.delay = d; localStorage.setItem('kendama_delay', d); }
+      settings.speed = parseFloat(document.getElementById('input-speed').value);
+      settings.delay = parseFloat(document.getElementById('input-delay').value);
+      localStorage.setItem('kendama_speed', settings.speed);
+      localStorage.setItem('kendama_delay', settings.delay);
     }
 
     function toggleSettings() {
       const panel = document.getElementById('settings-panel');
-      document.getElementById('set-speed').value = settings.speed;
-      document.getElementById('set-delay').value = settings.delay;
+      document.getElementById('input-speed').value = settings.speed;
+      document.getElementById('input-delay').value = settings.delay;
       panel.style.display = (panel.style.display === 'block') ? 'none' : 'block';
     }
 
@@ -140,11 +144,9 @@
     }
 
     async function init() {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        videoDevices = devices.filter(device => device.kind === 'videoinput');
-        if (videoDevices.length > 0) setupCamera(videoDevices[0].deviceId);
-      } catch (e) { alert("Camera Error: " + e); }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      videoDevices = devices.filter(device => device.kind === 'videoinput');
+      if (videoDevices.length > 0) setupCamera(videoDevices[0].deviceId);
     }
 
     async function setupCamera(deviceId) {
@@ -154,12 +156,7 @@
         currentStream = await navigator.mediaDevices.getUserMedia(constraints);
         hiddenLiveVideo.srcObject = currentStream;
         updateMode(mode);
-      } catch (e) {
-        // Fallback for mobile/other
-        currentStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        hiddenLiveVideo.srcObject = currentStream;
-        updateMode(mode);
-      }
+      } catch (e) { console.error(e); }
     }
 
     function updateMode(newMode) {
@@ -169,6 +166,7 @@
         resetState();
         if (mediaSource) { try { mediaSource.endOfStream(); } catch(e){} }
         
+        // GAS側の関数呼び出しを削除し、ローカルのsettingsを使用
         if (mode === 'LIVE') {
           displayVideo.srcObject = currentStream;
           displayVideo.src = "";
